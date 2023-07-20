@@ -1,0 +1,11 @@
+---
+healthchecks:
+  - name: google
+    interval: 5
+    url: https://www.google.com/
+  - name: github
+    interval: 10
+    url: https://www.github.com/
+  - name: gitlab
+    interval: 20
+    url: https://www.gitlab.com/
