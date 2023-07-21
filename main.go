@@ -6,6 +6,8 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -17,9 +19,11 @@ type FriggConfig struct {
 }
 
 type Healthcheck struct {
-	Name     string `yaml:"name"`
-	Interval int    `yaml:"interval"`
-	Url      string `yaml:"url"`
+	Name          string   `yaml:"name"`
+	Interval      int      `yaml:"interval"`
+	Url           string   `yaml:"url"`
+	RawAssertions []string `yaml:"assertions"`
+	Asserters     []Asserter
 }
 
 func (h Healthcheck) DebugInfo() string {
@@ -36,7 +40,12 @@ func (h Healthcheck) Do() {
 		log.Printf("request for %s failed with: %v", h.Url, err)
 	}
 
-	if resp.StatusCode == 200 {
+	pass := true
+	for _, a := range h.Asserters {
+		pass = pass && a.Do(resp)
+	}
+
+	if pass {
 		log.Printf("%s pass", h.DebugInfo())
 	} else {
 		log.Printf("%s fail", h.DebugInfo())
@@ -81,5 +90,71 @@ func parseConfig(config []byte) FriggConfig {
 	if err != nil {
 		panic(err)
 	}
+
+	for i, h := range friggConfig.Healthchecks {
+		for _, a := range h.RawAssertions {
+			h.Asserters = append(h.Asserters, NewAsserter(a))
+		}
+		friggConfig.Healthchecks[i].Asserters = h.Asserters
+	}
+
 	return friggConfig
+}
+
+// Assertion Parser and Logic
+type AssertionParser struct {
+	raw string
+}
+
+func NewAsserter(dsl string) Asserter {
+	a := AssertionParser{raw: dsl}
+	return a.ParseDsl()
+}
+
+func (a AssertionParser) ParseDsl() Asserter {
+	parts := strings.Split(a.raw, "(")
+	fn := parts[0]
+	val := strings.Split(parts[1], ")")[0]
+
+	switch fn {
+	case "text":
+		return TextAsserter{
+			Value: val,
+		}
+	case "status_code":
+		valAsInt, err := strconv.Atoi(val)
+		if err != nil {
+			panic(err)
+		}
+		return StatusCodeAsserter{
+			Value: valAsInt,
+		}
+	}
+
+	panic("should be unreachable")
+}
+
+type Asserter interface {
+	Do(resp *http.Response) bool
+}
+
+type TextAsserter struct {
+	Value string
+}
+
+func (a TextAsserter) Do(resp *http.Response) bool {
+	rawBody, err := ioutil.ReadAll(resp.Body)
+	if err != nil {
+		return false
+	}
+	body := string(rawBody)
+	return strings.Contains(body, a.Value)
+}
+
+type StatusCodeAsserter struct {
+	Value int
+}
+
+func (a StatusCodeAsserter) Do(resp *http.Response) bool {
+	return resp.StatusCode == a.Value
 }

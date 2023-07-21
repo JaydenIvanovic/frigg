@@ -1,0 +1,8 @@
+---
+healthchecks:
+  - name: google
+    interval: 5
+    url: https://www.google.com/
+    assertions:
+      - text(google)
+      - status_code(200)
